@@ -655,4 +655,10 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
         collateralToken.transfer(msg.sender, balance);
         
     }
+
+    // emergency withdraw all ETH balance
+    function emergencyWithdrawETH() external onlyOwner {
+        uint256 balance = address(this).balance;
+        payable(msg.sender).transfer(balance);
+    }
 }

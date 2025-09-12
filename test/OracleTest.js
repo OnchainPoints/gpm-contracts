@@ -1496,4 +1496,130 @@ describe("Prediction Oracle", function () {
     
         });
 
+    it("Should successfully emergency withdraw ETH from the oracle contract", async function () {
+
+        const {
+            predictionsOracle,
+        } = await loadFixture(deploy);
+
+        const [owner] = await ethers.getSigners();
+
+        const amountToSend = ethers.parseEther("1.0");
+        await owner.sendTransaction({
+            to: predictionsOracle.target,
+            value: amountToSend,
+        });
+
+        const contractEthBalance = await hre.ethers.provider.getBalance(predictionsOracle.target);
+        expect(contractEthBalance).to.be.equal(amountToSend);
+
+        const ownerStartBalance = await hre.ethers.provider.getBalance(owner.address);
+
+        const tx = await predictionsOracle.emergencyWithdrawETH();
+        const receipt = await tx.wait();
+        const gasUsed = receipt.gasUsed * receipt.gasPrice;
+
+        const ownerEndBalance = await hre.ethers.provider.getBalance(owner.address);
+
+        expect(ownerEndBalance).to.be.equal(ownerStartBalance + amountToSend - gasUsed);
+
+        const finalContractEthBalance = await hre.ethers.provider.getBalance(predictionsOracle.target);
+        expect(finalContractEthBalance).to.be.equal(0);
+
+    });
+
+    it("Should successfully buy a position for another user with buyPosition", async function () {
+        const { token, conditionalToken, predictionsOracle, questionId } = await loadFixture(deploy);
+        const [owner, otherAccount] = await ethers.getSigners();
+
+        const buyAmount = ethers.parseEther("1");
+        const outcomeIndex = 1;
+
+        // owner buys for otherAccount
+        await token.approve(predictionsOracle.target, buyAmount);
+        await expect(predictionsOracle.buyPosition(
+            questionId,
+            outcomeIndex,
+            buyAmount,
+            0,
+            otherAccount.address
+        )).to.emit(predictionsOracle, "BuyPosition");
+
+        // Check that otherAccount received the conditional tokens
+        const questionData = await predictionsOracle.questions(questionId);
+        const fpmm = await hre.ethers.getContractAt("FixedProductMarketMaker", questionData.fpmm);
+        const positionIds = await fpmm.getPositionIds();
+        const balance = await conditionalToken.balanceOf(otherAccount.address, positionIds[outcomeIndex]);
+        expect(balance).to.be.gt(0);
+    });
+
+    it("Should fail to buy if slippage protection is triggered", async function () {
+        const { token, predictionsOracle, questionId } = await loadFixture(deploy);
+        const [owner, otherAccount] = await ethers.getSigners();
+
+        const buyAmount = ethers.parseEther("2");
+        const outcomeIndex = 1;
+
+        const questionData = await predictionsOracle.questions(questionId);
+        const fpmm = await hre.ethers.getContractAt("FixedProductMarketMaker", questionData.fpmm);
+        const expectedTokens = await fpmm.calcBuyAmount(buyAmount, outcomeIndex);
+
+        const minTokensTooHigh = expectedTokens + BigInt(1);
+
+        await token.approve(predictionsOracle.target, buyAmount * BigInt(2));
+
+        // Test with buyPositionOnBehalf
+        await expect(predictionsOracle.buyPositionOnBehalf(
+            questionId,
+            outcomeIndex,
+            minTokensTooHigh,
+            buyAmount,
+            otherAccount.address
+        )).to.be.revertedWith("minimum buy amount not reached");
+
+        // Test with buyPosition
+        await token.transfer(otherAccount.address, buyAmount);
+        await token.connect(otherAccount).approve(predictionsOracle.target, buyAmount);
+        await expect(predictionsOracle.connect(otherAccount).buyPosition(
+            questionId,
+            outcomeIndex,
+            buyAmount,
+            minTokensTooHigh,
+            otherAccount.address
+        )).to.be.revertedWith("minimum buy amount not reached");
+    });
+
+    it("Should fail to redeem position with wrong number of index sets", async function () {
+        const { token, predictionsOracle, questionId, endTime } = await loadFixture(deploy);
+        const [owner, otherAccount] = await ethers.getSigners();
+
+        // Setup: buy a position so there is something to redeem
+        const buyAmount = ethers.parseEther("1");
+        const outcomeIndex = 1;
+        await token.approve(predictionsOracle.target, buyAmount);
+        await predictionsOracle.buyPositionOnBehalf(questionId, outcomeIndex, 0, buyAmount, otherAccount.address);
+
+        // Fast forward time
+        await time.increaseTo(endTime + 1);
+
+        // Resolve market
+        await predictionsOracle.updateProposers([owner.address], [1]);
+        await predictionsOracle.proposeAndResolve(questionId, [0, 1], "test-cid");
+
+        const invalidIndexSets = [1]; // Not all sets provided
+
+        await expect(
+            predictionsOracle.connect(otherAccount).redeemPosition(questionId, invalidIndexSets)
+        ).to.be.revertedWith("Invalid index sets");
+    });
+
+    it("Should fail to get position balances with invalid index set", async function () {
+        const { predictionsOracle, questionId } = await loadFixture(deploy);
+        const [owner] = await ethers.getSigners();
+        const invalidIndexSets = [1, 3]; // For 2 outcomes, 3 is invalid.
+        await expect(
+            predictionsOracle.getPositionBalances(questionId, invalidIndexSets, owner.address)
+        ).to.be.revertedWith("Got invalid index set");
+    });
+
   });
