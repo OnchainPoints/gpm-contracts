@@ -76,6 +76,59 @@ async function main() {
         predictionsOracle: predictionsOracle.target,
         popToken: popAddress
     });
+
+    if (hre.network.name === "hardhat" || hre.network.name === "localhost") {
+        console.log("Skipping verification for local network.");
+        return;
+    }
+
+    console.log("Waiting for block confirmations before verification...");
+    await new Promise(resolve => setTimeout(resolve, 30000)); // 30 seconds delay
+
+    console.log("Starting contract verification...");
+
+    if (deployNewPop.toLowerCase() === 'y') {
+        try {
+            console.log("Verifying POP token...");
+            await hre.run("verify:verify", {
+                address: popAddress,
+                constructorArguments: ["Prediction Oracle Points", "POP"],
+            });
+        } catch (error) {
+            console.error("POP token verification failed:", error.message);
+        }
+    }
+
+    try {
+        console.log("Verifying ConditionalTokens...");
+        await hre.run("verify:verify", {
+            address: conditionalToken.target,
+            constructorArguments: ["TEST URI"],
+        });
+    } catch (error) {
+        console.error("ConditionalTokens verification failed:", error.message);
+    }
+
+    try {
+        console.log("Verifying Factory...");
+        await hre.run("verify:verify", {
+            address: fpmmFactory.target,
+            constructorArguments: [],
+        });
+    } catch (error) {
+        console.error("Factory verification failed:", error.message);
+    }
+
+    try {
+        console.log("Verifying PredictionsOracle (proxy)...");
+        await hre.run("verify:verify", {
+            address: predictionsOracle.target,
+        });
+    } catch (error) {
+        console.error("PredictionsOracle verification failed:", error.message);
+    }
+
+    console.log("Verification process finished.");
 }
 
 main()
