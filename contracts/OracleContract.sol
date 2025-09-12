@@ -13,8 +13,7 @@ import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./ConditionalTokens.sol";
 import "./interfaces/IFactory.sol";
 import "./FixedProductMarketMaker.sol";
-import "./WPOP.sol";
-import "./OnchainPoints.sol";
+import "./ERC20.sol";
 
 /**
  * @title PredictionsOracle
@@ -29,10 +28,7 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
     // External contract interfaces
     ConditionalTokens public conditionalTokens;
     IFactory public FPMMFactory;
-    WPOP public collateralToken;
-
-    address payable onchainPointsAddress;
-
+    POP public collateralToken;
     // Structs to store market data
     struct QuestionData {
         uint256 beginTimestamp;
@@ -94,7 +90,6 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
     uint256 public maxBuyAmountPerQuestion;
     bytes32 parentCollectionId;
     bool public sellEnabled;
-    bool public buyWithUnlockedEnabled;
 
     // Sets to store initializers and proposers
     EnumerableSet.AddressSet private initializerSet;
@@ -150,19 +145,16 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
      * @dev Updates the addresses of external contracts
      * @param conditionalTokensAddress Address of the ConditionalTokens contract
      * @param FPMMFactoryAddress Address of the FixedProductMarketMaker factory
-     * @param collateralTokenAddress Address of the collateral token (WPOP)
-     * @param _onchainPointsAddress Address of the OnchainPoints contract
+     * @param collateralTokenAddress Address of the collateral token (POP)
      */
     function updateContracts(
         address conditionalTokensAddress,
         address FPMMFactoryAddress,
-        address collateralTokenAddress,
-        address _onchainPointsAddress
+        address collateralTokenAddress
     ) external onlyOwner {
         conditionalTokens = ConditionalTokens(conditionalTokensAddress);
         FPMMFactory = IFactory(FPMMFactoryAddress);
-        collateralToken = WPOP(collateralTokenAddress);
-        onchainPointsAddress = payable(_onchainPointsAddress);
+        collateralToken = POP(collateralTokenAddress);
         parentCollectionId = bytes32(0);
     }
 
@@ -172,14 +164,6 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
      */
     function updateMinBuyAmount(uint256 _minBuyAmount) external onlyOwner {
         minBuyAmount = _minBuyAmount;
-    }
-
-    /**
-     * @dev Enables or disables buying with unlocked tokens
-     * @param _buyWithUnlockedEnabled Whether buying with unlocked tokens is enabled
-     */
-    function updateBuyWithUnlockedEnabled(bool _buyWithUnlockedEnabled) external onlyOwner {
-        buyWithUnlockedEnabled = _buyWithUnlockedEnabled;
     }
 
     /**
@@ -248,8 +232,7 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
         uint256 initialFunding
     ) external onlyInitializer payable returns (address) {
         require(block.timestamp < endTimestamp-stopTradingBeforeMarketEnd, "Market End timestamp is too close to current time");
-        
-        require(address(this).balance >= initialFunding, "Insufficient funds");
+        require(collateralToken.balanceOf(address(this)) >= initialFunding, "Insufficient funds");
         
         conditionalTokens.prepareCondition(address(this), questionId, outcomeSlots);
         bytes32 conditionId = conditionalTokens.getConditionId(address(this), questionId, outcomeSlots);
@@ -272,8 +255,7 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
 
         address fpmmAddress = address(fpmm);
 
-        collateralToken.deposit{value: initialFunding}();
-        collateralToken.approve(address(fpmm), initialFunding);
+        collateralToken.approve(fpmmAddress, initialFunding);
 
         fpmm.addFunding(initialFunding, distributionHints);
 
@@ -312,90 +294,6 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
     }
 
     /**
-     * @dev Buys a position using a signature for spending tokens
-     * @param questionId The ID of the question
-     * @param outcomeIndex The index of the outcome to buy
-     * @param minOutcomeTokensToBuy The minimum number of outcome tokens to buy
-     * @param request The spending request
-     * @param signature The signature for the spending request
-     */
-    function buyPositionWithSignature(bytes32 questionId, uint256 outcomeIndex, uint256 minOutcomeTokensToBuy, OnchainPoints.Request calldata request, bytes calldata signature) nonReentrant external {
-
-        require(request.amount >= minBuyAmount, "Amount sent is less than minimum buy amount");
-
-        address spender = OnchainPoints(onchainPointsAddress).spendToken(request, signature);
-
-        uint256 userBuyAmount = userBuyAmounts[questionId][spender];
-        require(userBuyAmount + request.amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
-
-        userBuyAmounts[questionId][spender] = userBuyAmount + request.amount;
-        collateralToken.deposit{value: request.amount}();
-
-        address fpmmAddress = questions[questionId].fpmm;
-
-        collateralToken.approve(fpmmAddress, request.amount);
-
-        FixedProductMarketMaker fpmm = FixedProductMarketMaker(fpmmAddress);
-        uint256 outcomeTokensBought = fpmm.buyOnBehalf(request.amount, outcomeIndex, minOutcomeTokensToBuy, spender);
-
-        userSpendings[spender] += request.amount;
-        userOpenPositions[spender].add(questionId);
-
-        emit BuyPosition(
-            spender,
-            fpmmAddress,
-            questionId,
-            request.amount,
-            fpmm.fee(),
-            outcomeIndex,
-            outcomeTokensBought
-        );
-    }
-
-    /**
-     * @dev Buys a position on behalf of another user using a signature
-     * @param questionId The ID of the question
-     * @param outcomeIndex The index of the outcome to buy
-     * @param minOutcomeTokensToBuy The minimum number of outcome tokens to buy
-     * @param request The delegated spending request
-     * @param signature The signature for the delegated spending request
-     */
-    function buyPositionWithSignatureOnBehalf(bytes32 questionId, uint256 outcomeIndex, uint256 minOutcomeTokensToBuy, OnchainPoints.DelegatedRequest calldata request, bytes calldata signature) nonReentrant external {
-
-        require(request.amount >= minBuyAmount, "Amount sent is less than minimum buy amount");
-
-        OnchainPoints(onchainPointsAddress).spendTokensOnBehalf(request, signature);
-
-        address spender = request.owner;
-
-        uint256 userBuyAmount = userBuyAmounts[questionId][spender];
-        require(userBuyAmount + request.amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
-
-        userBuyAmounts[questionId][spender] = userBuyAmount + request.amount;
-        collateralToken.deposit{value: request.amount}();
-
-        address fpmmAddress = questions[questionId].fpmm;
-
-        collateralToken.approve(fpmmAddress, request.amount);
-
-        FixedProductMarketMaker fpmm = FixedProductMarketMaker(fpmmAddress);
-        uint256 outcomeTokensBought = fpmm.buyOnBehalf(request.amount, outcomeIndex, minOutcomeTokensToBuy, spender);
-
-        userSpendings[spender] += request.amount;
-        userOpenPositions[spender].add(questionId);
-
-        emit BuyPosition(
-            spender,
-            fpmmAddress,
-            questionId,
-            request.amount,
-            fpmm.fee(),
-            outcomeIndex,
-            outcomeTokensBought
-        );
-    }
-
-    /**
      * @dev Buys a position using locked tokens and optionally unlocked tokens (ETH)
      * @param questionId The ID of the question
      * @param outcomeIndex The index of the outcome to buy
@@ -404,84 +302,16 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
      * @notice This function allows users to buy a position using their locked tokens and, if enabled, additional unlocked tokens (ETH)
      * @notice If buyWithUnlockedEnabled is false, the function will not accept any ETH (msg.value must be 0)
      */
-    function buyPositionWithLocked(bytes32 questionId, uint256 outcomeIndex, uint256 minOutcomeTokensToBuy, uint256 amount) external nonReentrant payable {
-        require(amount >= minBuyAmount, "Amount sent is less than minimum buy amount");
+    function buyPositionOnBehalf(bytes32 questionId, uint256 outcomeIndex, uint256 minOutcomeTokensToBuy, uint256 amount, address spender) external nonReentrant {
+        require(amount >= minBuyAmount, "Amount is less than minimum buy amount");
 
-        if (!buyWithUnlockedEnabled){
-            require(msg.value == 0, "Buy with unlocked tokens is disabled");
-        }
-        
-        address spender = msg.sender;
+        require(collateralToken.allowance(msg.sender, address(this)) >= amount, "Insufficient allowance");
+        require(collateralToken.balanceOf(msg.sender) >= amount, "Insufficient balance");
 
         uint256 userBuyAmount = userBuyAmounts[questionId][spender];
         require(userBuyAmount + amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
 
-        uint256 userAvailableSpending = OnchainPoints(onchainPointsAddress).getAvailableSpending(spender);
-
-        require(userAvailableSpending + msg.value >= amount, "Insufficient funds");
-
-        uint256 unlockedTokensToSpend = 0;
-        if (userAvailableSpending >= amount){
-            OnchainPoints(onchainPointsAddress).spendTokenWithoutSignature(amount);
-        } else {
-            OnchainPoints(onchainPointsAddress).spendTokenWithoutSignature(userAvailableSpending);
-            unlockedTokensToSpend = amount - userAvailableSpending;
-        }
-
         address fpmmAddress = questions[questionId].fpmm;
-
-        collateralToken.deposit{value: amount}();
-        collateralToken.approve(fpmmAddress, amount);
-
-        userBuyAmounts[questionId][spender] = userBuyAmount + amount;
-
-        FixedProductMarketMaker fpmm = FixedProductMarketMaker(fpmmAddress);
-        uint256 outcomeTokensBought = fpmm.buyOnBehalf(amount, outcomeIndex, minOutcomeTokensToBuy, spender);
-        
-        userSpendings[spender] += amount;
-        userOpenPositions[spender].add(questionId);
-
-        emit BuyPosition(
-            spender,
-            fpmmAddress,
-            questionId,
-            amount,
-            fpmm.fee(),
-            outcomeIndex,
-            outcomeTokensBought
-        );
-
-        // Return any excess ETH sent
-        if (msg.value > unlockedTokensToSpend) {
-            payable(spender).transfer(msg.value - unlockedTokensToSpend);
-        }
-    }
-
-    /**
-     * @dev Buys a position on behalf of another user using locked tokens
-     * @param owner The address of the position owner
-     * @param questionId The ID of the question
-     * @param outcomeIndex The index of the outcome to buy
-     * @param minOutcomeTokensToBuy The minimum number of outcome tokens to buy
-     * @param amount The amount to spend
-     */
-    function buyPositionWithLockedOnBehalf(address owner, bytes32 questionId, uint256 outcomeIndex, uint256 minOutcomeTokensToBuy, uint256 amount) external nonReentrant{
-        require(amount >= minBuyAmount, "Amount sent is less than minimum buy amount");
-        
-        address spender = owner;
-
-        uint256 userBuyAmount = userBuyAmounts[questionId][spender];
-        require(userBuyAmount + amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
-
-        uint256 userAvailableSpending = OnchainPoints(onchainPointsAddress).getAvailableSpending(spender);
-
-        require(userAvailableSpending >= amount, "Insufficient funds");
-
-        OnchainPoints(onchainPointsAddress).spendTokensOnBehalfWithoutSignature(amount, owner);
-
-        address fpmmAddress = questions[questionId].fpmm;
-
-        collateralToken.deposit{value: amount}();
         collateralToken.approve(fpmmAddress, amount);
 
         userBuyAmounts[questionId][spender] = userBuyAmount + amount;
@@ -510,32 +340,31 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
      * @param minOutcomeTokensToBuy The minimum number of outcome tokens to buy
      * @param conditionTokensReceiver The address to receive the condition tokens
      */
-    function buyPosition(bytes32 questionId, uint256 outcomeIndex, uint256 minOutcomeTokensToBuy, address conditionTokensReceiver) external nonReentrant payable {
-        require(msg.value >= minBuyAmount, "Amount sent is less than minimum buy amount");
-        if (!proposerSet.contains(msg.sender)){
-            require(buyWithUnlockedEnabled, "Buy with unlocked tokens is disabled");
-        }
-        uint256 userBuyAmount = userBuyAmounts[questionId][conditionTokensReceiver];
-        require(userBuyAmount + msg.value <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
+    function buyPosition(bytes32 questionId, uint256 outcomeIndex, uint256 amount, uint256 minOutcomeTokensToBuy, address conditionTokensReceiver) external nonReentrant {
+        // check allowance
+        require(collateralToken.allowance(msg.sender, address(this)) >= amount, "Amount sent is less than minimum buy amount");
+        require(collateralToken.balanceOf(msg.sender) >= amount, "Amount sent is less than minimum buy amount");
 
-        userBuyAmounts[questionId][conditionTokensReceiver] = userBuyAmount + msg.value;
-        collateralToken.deposit{value: msg.value}();
+        uint256 userBuyAmount = userBuyAmounts[questionId][conditionTokensReceiver];
+        require(userBuyAmount + amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
+
+        userBuyAmounts[questionId][conditionTokensReceiver] = userBuyAmount + amount;
 
         address fpmmAddress = questions[questionId].fpmm;
 
-        collateralToken.approve(fpmmAddress, msg.value);
+        collateralToken.approve(fpmmAddress, amount);
 
         FixedProductMarketMaker fpmm = FixedProductMarketMaker(fpmmAddress);
-        uint256 outcomeTokensBought = fpmm.buyOnBehalf(msg.value, outcomeIndex, minOutcomeTokensToBuy, conditionTokensReceiver);
+        uint256 outcomeTokensBought = fpmm.buyOnBehalf(amount, outcomeIndex, minOutcomeTokensToBuy, conditionTokensReceiver);
 
-        userSpendings[conditionTokensReceiver] += msg.value;
+        userSpendings[conditionTokensReceiver] += amount;
         userOpenPositions[conditionTokensReceiver].add(questionId);
 
         emit BuyPosition(
             conditionTokensReceiver,
             fpmmAddress,
             questionId,
-            msg.value,
+            amount,
             fpmm.fee(),
             outcomeIndex,
             outcomeTokensBought
@@ -564,8 +393,7 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
 
         fpmm.sellOnBehalf(returnAmount, outcomeIndex, outcomeTokensToSell);
 
-        collateralToken.withdraw(returnAmount);
-        payable(msg.sender).transfer(returnAmount);
+        collateralToken.transfer(msg.sender, returnAmount);
 
         emit SellPosition(
             msg.sender,
@@ -634,11 +462,8 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
             msg.sender
         );
 
-        // unwrap collateral tokens
-        collateralToken.withdraw(totalPayout);
-
         // transfer POP to user
-        payable(msg.sender).transfer(totalPayout);
+        collateralToken.transfer(msg.sender, totalPayout);
 
         userRedeemed[msg.sender] += totalPayout;
         userOpenPositions[msg.sender].remove(questionId);
@@ -795,8 +620,6 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
 
         uint256 tokensRedeemed = balanceAfter - balanceBefore;
         
-        collateralToken.withdraw(tokensRedeemed);
-
         emit FundingRecovered(questionId, tokensRedeemed, msg.sender);
     }
 
@@ -826,7 +649,8 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
 
     // emergency withdraw all balance
     function emergencyWithdraw() external onlyOwner {
-        uint256 balance = address(this).balance;
-        payable(msg.sender).transfer(balance);
+        uint256 balance = collateralToken.balanceOf(address(this));
+        collateralToken.transfer(msg.sender, balance);
+        
     }
 }
