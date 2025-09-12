@@ -14,8 +14,8 @@ describe("Deployment", function () {
     // Contracts are deployed using the first signer/account by default
     const [owner] = await ethers.getSigners();
 
-    const tokenContract = await hre.ethers.getContractFactory("WPOP");
-    const token = await tokenContract.deploy();
+    const tokenContract = await hre.ethers.getContractFactory("POP");
+    const token = await tokenContract.deploy("Prediction Oracle Points", "POP");
 
     const conditionalTokenContract = await hre.ethers.getContractFactory("ConditionalTokens");
     const conditionalToken = await conditionalTokenContract.deploy("TEST URI");
@@ -23,32 +23,23 @@ describe("Deployment", function () {
     const fpmmFactoryContract = await hre.ethers.getContractFactory("Factory");
     const fpmmFactory = await fpmmFactoryContract.deploy();
 
-    const onchainPointsContract = await hre.ethers.getContractFactory("OnchainPoints");
-    const onchainPoints = await upgrades.deployProxy(onchainPointsContract, [owner.address], {
-      initializer: "initialize",
-      kind: "uups"
-    });
+    // OnchainPoints contract removed from the new contract structure
 
     const predictionOracleContract = await hre.ethers.getContractFactory("PredictionsOracle");
-    const predictionsOracle = await upgrades.deployProxy(predictionOracleContract, [owner.address, ], {
+    const predictionsOracle = await upgrades.deployProxy(predictionOracleContract, [owner.address], {
       initializer: "initialize",
       kind: "uups"
     });
 
     await predictionsOracle.updateContracts(
-      conditionalToken.target, fpmmFactory.target, token.target, onchainPoints.target
+      conditionalToken.target, fpmmFactory.target, token.target
     )
-
-    await token.deposit({
-      value: BigInt("100000000000000000000")
-    });
 
     return {
       token,
       conditionalToken,
       fpmmFactory,
       predictionsOracle,
-      onchainPoints,
       owner
     };
   }

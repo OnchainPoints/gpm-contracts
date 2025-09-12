@@ -307,6 +307,7 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
 
         require(collateralToken.allowance(msg.sender, address(this)) >= amount, "Insufficient allowance");
         require(collateralToken.balanceOf(msg.sender) >= amount, "Insufficient balance");
+        collateralToken.transferFrom(msg.sender, address(this), amount);
 
         uint256 userBuyAmount = userBuyAmounts[questionId][spender];
         require(userBuyAmount + amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
@@ -342,8 +343,9 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
      */
     function buyPosition(bytes32 questionId, uint256 outcomeIndex, uint256 amount, uint256 minOutcomeTokensToBuy, address conditionTokensReceiver) external nonReentrant {
         // check allowance
-        require(collateralToken.allowance(msg.sender, address(this)) >= amount, "Amount sent is less than minimum buy amount");
-        require(collateralToken.balanceOf(msg.sender) >= amount, "Amount sent is less than minimum buy amount");
+        require(collateralToken.allowance(msg.sender, address(this)) >= amount, "Insufficient allowance");
+        require(collateralToken.balanceOf(msg.sender) >= amount, "Insufficient balance");
+        collateralToken.transferFrom(msg.sender, address(this), amount);
 
         uint256 userBuyAmount = userBuyAmounts[questionId][conditionTokensReceiver];
         require(userBuyAmount + amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");

@@ -9,6 +9,8 @@ const {
 const { ethers } = require("hardhat");
 
 
+// Commented out as OnchainPoints contract has been removed
+/*
 async function generateSignature(account, onchainPointsContract, nonceValue, amount) {
     const domain = {
       name: 'OnchainPointsContract',
@@ -47,6 +49,7 @@ async function generateSignature(account, onchainPointsContract, nonceValue, amo
       signature
     };
 }
+*/
 
 
 describe("Prediction Oracle", function () {
@@ -58,8 +61,8 @@ describe("Prediction Oracle", function () {
         // Contracts are deployed using the first signer/account by default
         const [owner] = await ethers.getSigners();
         console.log(upgrades);
-        const tokenContract = await hre.ethers.getContractFactory("WPOP");
-        const token = await tokenContract.deploy();
+        const tokenContract = await hre.ethers.getContractFactory("POP");
+        const token = await tokenContract.deploy("Prediction Oracle Points", "POP");
 
         const conditionalTokenContract = await hre.ethers.getContractFactory("ConditionalTokens");
         const conditionalToken = await conditionalTokenContract.deploy("TEST URI");
@@ -67,11 +70,7 @@ describe("Prediction Oracle", function () {
         const fpmmFactoryContract = await hre.ethers.getContractFactory("Factory");
         const fpmmFactory = await fpmmFactoryContract.deploy();
 
-        const onchainPointsContract = await hre.ethers.getContractFactory("OnchainPoints");
-        const onchainPoints = await upgrades.deployProxy(onchainPointsContract, [owner.address], {
-            initializer: "initialize",
-            kind: "uups"
-        });
+        // OnchainPoints contract removed from the new contract structure
 
         const predictionOracleContract = await hre.ethers.getContractFactory("PredictionsOracle");
         const predictionsOracle = await upgrades.deployProxy(predictionOracleContract, [owner.address, ], {
@@ -80,9 +79,8 @@ describe("Prediction Oracle", function () {
         });
 
         await predictionsOracle.updateContracts(
-            conditionalToken.target, fpmmFactory.target, token.target, onchainPoints.target
+            conditionalToken.target, fpmmFactory.target, token.target
         )
-        await predictionsOracle.updateBuyWithUnlockedEnabled(true);
 
 
         // set oracle address on conditional token contract
@@ -118,29 +116,29 @@ describe("Prediction Oracle", function () {
             initializersStatus
         )).to.emit(predictionsOracle, "InitializerUpdated");
 
-        // mint WPOP tokens for owner address
-        console.log('balance', await hre.ethers.provider.getBalance(owner.address));
-        await token.deposit({
-            value: BigInt("10000000000000000000")
-        });
+        // POP tokens are already minted to owner in constructor
+        console.log('POP balance', await token.balanceOf(owner.address));
 
         const blockTimestamp = (await hre.ethers.provider.getBlock("latest")).timestamp;
         const endTime = blockTimestamp + 3600;
         await predictionsOracle.updateMaxBuyAmountPerQuestion(
             BigInt("10000000000000000000000")
         );
+        // transfer POP tokens to the oracle contract for funding
+        await token.transfer(predictionsOracle.target, addedFunds);
+
         // create new market 1
         await predictionsOracle.createMarket(
             endTime,
             questionId,
             outcomeSlotCount,
             fee,
-            distributionHints, 
-            addedFunds,
-            {
-                value: addedFunds
-            }
+            distributionHints,
+            addedFunds
         );
+
+        // transfer more POP tokens for the second market
+        await token.transfer(predictionsOracle.target, addedFunds);
 
         await predictionsOracle.createMarket(
             endTime,
@@ -148,10 +146,7 @@ describe("Prediction Oracle", function () {
             outcomeSlotCount,
             fee,
             distributionHints,
-            addedFunds,
-            {
-                value: addedFunds
-            }
+            addedFunds
         );
 
 
@@ -164,8 +159,7 @@ describe("Prediction Oracle", function () {
             questionId2,
             endTime,
             outcomeSlotCount,
-            addedFunds,
-            onchainPoints
+            addedFunds
         };
     }
 
@@ -253,14 +247,17 @@ describe("Prediction Oracle", function () {
 
         console.log("expectedBuyAmount", expectedBuyAmount);
 
-        // buy position on behalf of user
-        await expect(predictionsOracle.buyPosition(
+        // approve predictionsOracle to spend owner's tokens
+        await token.approve(predictionsOracle.target, buyAmount);
+
+        // buy position on behalf of user (owner provides tokens, buying for otherAccount)
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            })).to.emit(predictionsOracle, "BuyPosition");
+            buyAmount,
+            otherAccount.address
+        )).to.emit(predictionsOracle, "BuyPosition");
 
         const userEndBalances = await conditionalToken.balanceOfBatch([otherAccount.address, otherAccount.address], [positionId1, positionId2]);
 
@@ -285,13 +282,13 @@ describe("Prediction Oracle", function () {
 
         // redeem position on behalf of user
         const indexSets = [1, 2];
-        const startBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const startBalance = await token.balanceOf(otherAccount.address);
 
         await expect(predictionsOracle.connect(otherAccount).redeemPosition(
             questionId,
             indexSets)).to.emit(predictionsOracle, "RedeemPosition");
 
-        const endBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const endBalance = await token.balanceOf(otherAccount.address);
 
         console.log("startWPOPBalance", startBalance);
         console.log("endWPOPBalance", endBalance);
@@ -362,23 +359,26 @@ describe("Prediction Oracle", function () {
         console.log("expectedBuyAmount", expectedBuyAmount);
         console.log("expectedBuyAmountQ2", expectedBuyAmountQ2);
 
+        // approve predictionsOracle to spend owner's tokens
+        await token.approve(predictionsOracle.target, buyAmount * BigInt(2));
+
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            })).to.emit(predictionsOracle, "BuyPosition");
+            buyAmount,
+            otherAccount.address
+        )).to.emit(predictionsOracle, "BuyPosition");
 
         // buy for second question
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId2,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            })).to.emit(predictionsOracle, "BuyPosition");
+            buyAmount,
+            otherAccount.address
+        )).to.emit(predictionsOracle, "BuyPosition");
 
         const userEndBalances = await conditionalToken.balanceOfBatch([otherAccount.address, otherAccount.address], [positionId1, positionId2]);
         const userEndBalancesQ2 = await conditionalToken.balanceOfBatch([otherAccount.address, otherAccount.address], [positionId1Q2, positionId2Q2]);
@@ -409,11 +409,11 @@ describe("Prediction Oracle", function () {
 
         // redeem position on behalf of user
         const indexSets = [1, 2];
-        const startBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const startBalance = await token.balanceOf(otherAccount.address);
 
         await expect(predictionsOracle.connect(otherAccount).redeemPositions(10)).to.emit(predictionsOracle, "RedeemPosition");
 
-        const endBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const endBalance = await token.balanceOf(otherAccount.address);
 
         // open positions should be empty
         const openPositions = await predictionsOracle.getUserOpenPositions(otherAccount.address);
@@ -548,23 +548,26 @@ describe("Prediction Oracle", function () {
         console.log("expectedBuyAmount", expectedBuyAmount);
         console.log("expectedBuyAmountQ2", expectedBuyAmountQ2);
 
+        // approve predictionsOracle to spend owner's tokens
+        await token.approve(predictionsOracle.target, buyAmount * BigInt(2));
+
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            })).to.emit(predictionsOracle, "BuyPosition");
+            buyAmount,
+            otherAccount.address
+        )).to.emit(predictionsOracle, "BuyPosition");
 
         // buy for second question
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId2,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            })).to.emit(predictionsOracle, "BuyPosition");
+            buyAmount,
+            otherAccount.address
+        )).to.emit(predictionsOracle, "BuyPosition");
 
         const userEndBalances = await conditionalToken.balanceOfBatch([otherAccount.address, otherAccount.address], [positionId1, positionId2]);
         const userEndBalancesQ2 = await conditionalToken.balanceOfBatch([otherAccount.address, otherAccount.address], [positionId1Q2, positionId2Q2]);
@@ -595,11 +598,11 @@ describe("Prediction Oracle", function () {
 
         // redeem position on behalf of user
         const indexSets = [1, 2];
-        const startBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const startBalance = await token.balanceOf(otherAccount.address);
 
         await expect(predictionsOracle.connect(otherAccount).redeemPositions(10)).to.emit(predictionsOracle, "RedeemPosition");
 
-        const endBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const endBalance = await token.balanceOf(otherAccount.address);
 
         // open positions should be empty
         const openPositions = await predictionsOracle.getUserOpenPositions(otherAccount.address);
@@ -641,23 +644,26 @@ describe("Prediction Oracle", function () {
         // attempt to buy position in inactive market
         const outcomeIndex = 1;
 
+        // approve predictionsOracle to spend owner's tokens
+        await token.approve(predictionsOracle.target, buyAmount);
+
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            })).to.be.revertedWith("market is not active");
+            buyAmount,
+            otherAccount.address
+        )).to.be.revertedWith("market is not active");
 
     });
 
     it("Should prevent buying with incorrect amounts", async function () {
 
         const {
+            token,
             predictionsOracle,
-            questionId,
-            onchainPoints
+            questionId
         } = await loadFixture(deploy);
 
         const [owner, otherAccount] = await ethers.getSigners();
@@ -670,149 +676,51 @@ describe("Prediction Oracle", function () {
         const invalidMinBuyAmount = minBuyAmount - BigInt(1)
 
         // regular buy
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             1,
             0,
-            owner.address, {
-                value: invalidMinBuyAmount
-            })).to.be.revertedWith("Amount sent is less than minimum buy amount");
+            invalidMinBuyAmount,
+            owner.address
+        )).to.be.revertedWith("Amount is less than minimum buy amount");
 
-        // buy with unlocked should fail if disabled
-        await predictionsOracle.updateBuyWithUnlockedEnabled(false);
-        await expect(predictionsOracle.buyPosition(
+        // test with insufficient allowance
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             1,
             0,
-            owner.address, {
-                value: minBuyAmount
-            })).to.be.revertedWith("Buy with unlocked tokens is disabled");
+            minBuyAmount,
+            owner.address
+        )).to.be.revertedWith("Insufficient allowance");
 
-        // proposers should be able to buy with unlocked tokens
+        // approve predictionsOracle to spend owner's tokens
+        await token.approve(predictionsOracle.target, minBuyAmount);
+
+        // proposers can buy positions
         await predictionsOracle.updateProposers([owner.address], [1]);
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             1,
             0,
-            owner.address, {
-                value: minBuyAmount
-            })).to.emit(predictionsOracle, "BuyPosition");
-        
-        await predictionsOracle.updateBuyWithUnlockedEnabled(true);
-        
+            minBuyAmount,
+            owner.address
+        )).to.emit(predictionsOracle, "BuyPosition");
+
         // buy should fail if amount is greater than max buy amount
         const newMaxBuyAmount = BigInt("1000000000000000000");
         await predictionsOracle.updateMaxBuyAmountPerQuestion(newMaxBuyAmount);
         const maxBuyAmount = await predictionsOracle.maxBuyAmountPerQuestion();
         const invalidMaxBuyAmount = maxBuyAmount + BigInt(1);
-        await expect(predictionsOracle.buyPosition(
+
+        await token.approve(predictionsOracle.target, invalidMaxBuyAmount);
+
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             1,
             0,
-            owner.address, {
-                value: invalidMaxBuyAmount
-            }
-        )).to.be.revertedWith('Amount exceeds maximum buy amount per question');
-        
-        // buy should fail for locked tokens
-        await expect(predictionsOracle.buyPositionWithLocked(
-            questionId,
-            1,
-            0,
-            invalidMinBuyAmount, 
-            {
-                value: invalidMinBuyAmount
-            }
-        )).to.be.revertedWith("Amount sent is less than minimum buy amount");
-
-        // buy should fail for locked tokens if amount is greater than max buy amount
-        await expect(predictionsOracle.buyPositionWithLocked(
-            questionId,
-            1,
-            0,
-            invalidMaxBuyAmount, 
-            {
-                value: invalidMaxBuyAmount
-            }
-        )).to.be.revertedWith('Amount exceeds maximum buy amount per question');
-
-        // buy should fail for locked tokens if buy with unlocked is disabled + value sent
-        await predictionsOracle.updateBuyWithUnlockedEnabled(false);
-        await expect(predictionsOracle.buyPositionWithLocked(
-            questionId,
-            1,
-            0,
-            minBuyAmount, 
-            {
-                value: 1
-            }
-        )).to.be.revertedWith("Buy with unlocked tokens is disabled");
-        await predictionsOracle.updateBuyWithUnlockedEnabled(true);
-
-        // buy should fail for locked tokens if incorrect amount is sent
-        await expect(predictionsOracle.buyPositionWithLocked(
-            questionId,
-            1,
-            0,
-            minBuyAmount, 
-            {
-                value: minBuyAmount - BigInt(1)
-            }
-        )).to.be.revertedWith("Insufficient funds");
-
-        // buy should succeed for locked tokens if zero value is sent with unlocked tokens disabled 
-        await predictionsOracle.updateBuyWithUnlockedEnabled(false);
-        await onchainPoints.updateMaxDailySpendingCap(minBuyAmount);
-        await onchainPoints.adminUpdateBalance(owner.address, minBuyAmount);
-        await onchainPoints.adminUpdateReferenceBalance(owner.address, minBuyAmount);
-        await onchainPoints.setMaxDailySpending([1,1]);
-        await onchainPoints.addAuthorizedAddress(predictionsOracle.target);
-        await owner.sendTransaction({
-            to: onchainPoints.target,
-            value: minBuyAmount
-        });
-
-        const availableSpending = await onchainPoints.getAvailableSpending(owner.address);
-        console.log("availableSpending", availableSpending);
-
-        await expect(predictionsOracle.buyPositionWithLocked(
-            questionId,
-            1,
-            0,
-            minBuyAmount, 
-            {
-                value: 0
-            }
-        )).to.emit(predictionsOracle, "BuyPosition");
-
-        // buying with signature should fail if incorrect amount is sent
-        await onchainPoints.updateMaxDailySpendingCap(maxBuyAmount * BigInt(2));
-        await onchainPoints.adminUpdateBalance(owner.address, maxBuyAmount * BigInt(2));
-        await onchainPoints.adminUpdateReferenceBalance(owner.address, maxBuyAmount * BigInt(2));
-        
-        await owner.sendTransaction({
-            to: onchainPoints.target,
-            value: maxBuyAmount * BigInt(2)
-        });
-
-        let sig_data = await generateSignature(owner, onchainPoints.target, "testNonce1", invalidMinBuyAmount);
-        await expect(predictionsOracle.buyPositionWithSignature(
-            questionId,
-            1,
-            0,
-            sig_data.data,
-            sig_data.signature
-        )).to.be.revertedWith("Amount sent is less than minimum buy amount");
-
-        sig_data = await generateSignature(owner, onchainPoints.target, "testNonce1", invalidMaxBuyAmount);
-        await expect(predictionsOracle.buyPositionWithSignature(
-            questionId,
-            1,
-            0,
-            sig_data.data,
-            sig_data.signature
-        )).to.be.revertedWith("Amount exceeds maximum buy amount per question");
-    
+            invalidMaxBuyAmount,
+            owner.address
+        )).to.be.revertedWith('Amount exceeds maximum buy amount per question');   
 
     });
 
@@ -842,13 +750,15 @@ describe("Prediction Oracle", function () {
         // buy position on behalf of user
         const buyAmount = addedFunds / BigInt(2);
         const outcomeIndex = 1;
-        await predictionsOracle.buyPosition(
+
+        await token.approve(predictionsOracle.target, buyAmount);
+
+        await predictionsOracle.buyPositionOnBehalf(
             questionId,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            }
+            buyAmount,
+            otherAccount.address
         );
 
         const remainingBuyAmount = await predictionsOracle.getRemainingBuyAmount(
@@ -875,17 +785,19 @@ describe("Prediction Oracle", function () {
         // send collateral token to other accounts
         const buyAmount = BigInt("1000000000000000000");
 
+        // approve predictionsOracle for all buys
+        await token.approve(predictionsOracle.target, buyAmount * BigInt(accounts.length + 1));
+
         // buy position on multiple accounts
         const outcomeIndex = 1;
 
         for (const account of accounts) {
-            await predictionsOracle.buyPosition(
+            await predictionsOracle.buyPositionOnBehalf(
                 questionId,
                 outcomeIndex,
                 0,
-                account.address, {
-                    value: buyAmount
-                }
+                buyAmount,
+                account.address
             );
         }
 
@@ -895,13 +807,12 @@ describe("Prediction Oracle", function () {
         )).to.be.equal(accounts.length);
 
         // buy again with another account, shouldn't increment unique buys
-        await predictionsOracle.buyPosition(
+        await predictionsOracle.buyPositionOnBehalf(
             questionId,
             outcomeIndex,
             0,
-            otherAccount3.address, {
-                value: buyAmount
-            }
+            buyAmount,
+            otherAccount3.address
         );
 
         // check unique buys
@@ -926,13 +837,18 @@ describe("Prediction Oracle", function () {
         // buy position to increment unique buys
         const buyAmount = BigInt("1000000000000000000");
         const outcomeIndex = 1;
+
+        // send collateral token to other account
+        await token.transfer(otherAccount.address, buyAmount);
+        // approve oracle to spend pop tokens
+        await token.connect(otherAccount).approve(predictionsOracle.target, buyAmount);
+
         await predictionsOracle.connect(otherAccount).buyPosition(
             questionId,
             outcomeIndex,
+            buyAmount,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            }
+            otherAccount.address
         );
 
         // get market data
@@ -966,6 +882,7 @@ describe("Prediction Oracle", function () {
     it("Should only allow redemption if sender has a position", async function () {
 
         const {
+            token,
             predictionsOracle,
             questionId,
             endTime,
@@ -976,14 +893,17 @@ describe("Prediction Oracle", function () {
         const buyAmount = BigInt("1000000000000000000");
         const outcomeIndex = 1;
 
+        // approve predictionsOracle to spend owner's tokens
+        await token.approve(predictionsOracle.target, buyAmount);
+
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPosition(
+        await expect(predictionsOracle.buyPositionOnBehalf(
             questionId,
             outcomeIndex,
             0,
-            otherAccount.address, {
-                value: buyAmount
-            })).to.emit(predictionsOracle, "BuyPosition");
+            buyAmount,
+            otherAccount.address
+        )).to.emit(predictionsOracle, "BuyPosition");
 
         // pass time to resolve market
         const blockNumber = await hre.ethers.provider.getBlockNumber();
@@ -1002,7 +922,7 @@ describe("Prediction Oracle", function () {
 
         // redeem position on behalf of user
         const indexSets = [1, 2];
-        const startBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const startBalance = await token.balanceOf(otherAccount.address);
 
         // getPositionBalances should return at least one non-zero balance
         const startPositionBalances = await predictionsOracle.getPositionBalances(questionId, indexSets, otherAccount.address);
@@ -1015,7 +935,7 @@ describe("Prediction Oracle", function () {
             questionId,
             indexSets)).to.emit(predictionsOracle, "RedeemPosition");
 
-        const endBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const endBalance = await token.balanceOf(otherAccount.address);
 
         console.log("startWPOPBalance", startBalance);
         console.log("endWPOPBalance", endBalance);
@@ -1038,6 +958,7 @@ describe("Prediction Oracle", function () {
     it("Should successfully sell a position in a market", async function () {
 
         const {
+            token,
             predictionsOracle,
             questionId,
             conditionalToken,
@@ -1064,12 +985,14 @@ describe("Prediction Oracle", function () {
         const buyAmount = BigInt("1000000000000000000");
         const outcomeIndex = 1;
 
-        await predictionsOracle.buyPosition(
-            questionId, 
+        await token.approve(predictionsOracle.target, buyAmount);
+
+        await predictionsOracle.buyPositionOnBehalf(
+            questionId,
             outcomeIndex,
             0,
-            otherAccount.address,
-            {value: buyAmount}
+            buyAmount,
+            otherAccount.address
         );
 
         fpmmBalances = await conditionalToken.balanceOfBatch(accounts, idArray);
@@ -1091,7 +1014,7 @@ describe("Prediction Oracle", function () {
         console.log("calcSell", calcSell);
         
         const indexSets = [1, 2];
-        const startPLTBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const startPLTBalance = await token.balanceOf(otherAccount.address);
         const startPositionBalances = await predictionsOracle.getPositionBalances(questionId, indexSets, otherAccount.address);
 
         // allow selling of positions in oracle contract
@@ -1107,7 +1030,7 @@ describe("Prediction Oracle", function () {
             startPositionBalances[outcomeIndex]
         )).to.emit(predictionsOracle, "SellPosition");
 
-        const endPLTBalance = await hre.ethers.provider.getBalance(otherAccount.address);
+        const endPLTBalance = await token.balanceOf(otherAccount.address);
         const endPositionBalances = await predictionsOracle.getPositionBalances(questionId, indexSets, otherAccount.address);
 
         console.log("startPLTBalance", startPLTBalance);
@@ -1126,6 +1049,7 @@ describe("Prediction Oracle", function () {
     it("Should create a market without sending funds if the contract is funded", async function () {
 
         const {
+            token,
             predictionsOracle,
             addedFunds
         } = await loadFixture(deploy);
@@ -1133,14 +1057,10 @@ describe("Prediction Oracle", function () {
         const [owner] = await ethers.getSigners();
 
         const contractFunds = ethers.parseUnits("100", 18)
-        const sendEthTx1 = await owner.sendTransaction({
-            to: predictionsOracle.target,
-            value: contractFunds,
-          });
-        await sendEthTx1.wait();
+        await token.transfer(predictionsOracle.target, contractFunds);
 
-        const contractBalance = await hre.ethers.provider.getBalance(predictionsOracle.target);
-        expect(contractBalance).to.be.equal(contractFunds);
+        const contractBalance = await token.balanceOf(predictionsOracle.target);
+        expect(contractBalance).to.be.gt(0);
 
         const blockTimestamp = (await hre.ethers.provider.getBlock("latest")).timestamp;
         const endTime = blockTimestamp + 3600;
@@ -1171,6 +1091,7 @@ describe("Prediction Oracle", function () {
     it("Should fail to create a market with improper funding", async function () {
 
         const {
+            token,
             predictionsOracle,
             addedFunds
         } = await loadFixture(deploy);
@@ -1184,19 +1105,17 @@ describe("Prediction Oracle", function () {
         const distributionHints = [1, 1];
         const questionId = "0x4b22fe478b95fdaa835ddddf631ab29f12900b62061e0c5fd8564ddb7b684999";
 
-        const valuetoSend = addedFunds - BigInt(1);
+        const contractBalance = await token.balanceOf(predictionsOracle.target);
+        const fundingAmount = contractBalance + BigInt(1);
 
-        // create market without sending correct value
+        // create market with insufficient funds
         await expect(predictionsOracle.createMarket(
             endTime,
             questionId,
             outcomeSlotCount,
             fee,
             distributionHints,
-            addedFunds,
-            {
-                value: valuetoSend
-            }
+            fundingAmount
         )).to.be.revertedWith("Insufficient funds");
     
     });
@@ -1204,6 +1123,7 @@ describe("Prediction Oracle", function () {
     it("Should fail to create a market with invalid end time", async function () {
 
         const {
+            token,
             predictionsOracle,
             addedFunds
         } = await loadFixture(deploy);
@@ -1219,6 +1139,8 @@ describe("Prediction Oracle", function () {
         const distributionHints = [1, 1];
         const questionId = "0x4b22fe478b95fdaa835ddddf631ab29f12900b62061e0c5fd8564ddb7b684999";
 
+        await token.transfer(predictionsOracle.target, addedFunds);
+
         // create market with invalid end time
         await expect(predictionsOracle.createMarket(
             invalidEndTime,
@@ -1226,10 +1148,7 @@ describe("Prediction Oracle", function () {
             outcomeSlotCount,
             fee,
             distributionHints,
-            addedFunds,
-            {
-                value: addedFunds
-            }
+            addedFunds
         )).to.be.revertedWith("Market End timestamp is too close to current time");
 
     });
@@ -1261,26 +1180,29 @@ describe("Prediction Oracle", function () {
     it("Should successfully emergency withdraw funds from the oracle contract", async function () {
 
         const {
+            token,
             predictionsOracle,
             addedFunds
         } = await loadFixture(deploy);
 
         const [owner] = await ethers.getSigners();
 
-        const sendEthTx1 = await owner.sendTransaction({
-            to: predictionsOracle.target,
-            value: ethers.parseUnits("100", 18),
-          });
-        await sendEthTx1.wait();
+        // Transfer some funds to the oracle contract to test emergency withdraw
+        const amountToWithdraw = ethers.parseUnits("100", 18);
+        await token.transfer(predictionsOracle.target, amountToWithdraw);
 
-        const startBalance = await hre.ethers.provider.getBalance(owner.address);
+        const contractPopBalance = await token.balanceOf(predictionsOracle.target);
+        expect(contractPopBalance).to.be.equal(amountToWithdraw);
+
+        const ownerStartBalance = await token.balanceOf(owner.address);
         await predictionsOracle.emergencyWithdraw();
-        const endBalance = await hre.ethers.provider.getBalance(owner.address);
+        const ownerEndBalance = await token.balanceOf(owner.address);
 
-        console.log("startBalance", startBalance);
-        console.log("endBalance", endBalance);
+        expect(ownerEndBalance).to.be.gt(ownerStartBalance);
+        expect(ownerEndBalance).to.be.equal(ownerStartBalance + amountToWithdraw);
 
-        expect(endBalance).to.be.gt(startBalance);
+        const finalContractPopBalance = await token.balanceOf(predictionsOracle.target);
+        expect(finalContractPopBalance).to.be.equal(0);
 
     });
 
@@ -1408,25 +1330,23 @@ describe("Prediction Oracle", function () {
 
         const {
             predictionsOracle,
+            conditionalToken,
+            fpmmFactory,
+            token
         } = await loadFixture(deploy);
 
         const [owner, otherAccount] = await ethers.getSigners();
 
         await expect(
             predictionsOracle.connect(otherAccount).updateContracts(
-                otherAccount.address,
-                otherAccount.address,
-                otherAccount.address,
-                otherAccount.address
+                conditionalToken.target,
+                fpmmFactory.target,
+                token.target
             )
         ).to.be.revertedWithCustomError(predictionsOracle, "OwnableUnauthorizedAccount");
 
         await expect(
             predictionsOracle.connect(otherAccount).updateMinBuyAmount(1)
-        ).to.be.revertedWithCustomError(predictionsOracle, "OwnableUnauthorizedAccount");
-
-        await expect(
-            predictionsOracle.connect(otherAccount).updateBuyWithUnlockedEnabled(false)
         ).to.be.revertedWithCustomError(predictionsOracle, "OwnableUnauthorizedAccount");
 
         await expect(
@@ -1518,6 +1438,7 @@ describe("Prediction Oracle", function () {
     it("Should correctly return the position balances for a user", async function () {
             
             const {
+                token,
                 predictionsOracle,
                 questionId,
                 addedFunds
@@ -1534,13 +1455,14 @@ describe("Prediction Oracle", function () {
             const outcomeIndex = 1;
             const expectedReturn = await fpmm.calcBuyAmount(buyAmount, outcomeIndex);
     
-            await predictionsOracle.buyPosition(
+            await token.approve(predictionsOracle.target, buyAmount);
+
+            await predictionsOracle.buyPositionOnBehalf(
                 questionId,
                 outcomeIndex,
                 0,
-                otherAccount.address, {
-                    value: buyAmount
-                }
+                buyAmount,
+                otherAccount.address
             );
     
             const indexSets = [1, 2];
