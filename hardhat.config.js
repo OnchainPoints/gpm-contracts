@@ -16,7 +16,7 @@ module.exports = {
   networks: {
     conduit: {
       url: process.env.RPC_URL_CONDUIT,
-      chainId: 17071,
+      chainId: 11167,
       accounts: [process.env.PRIVATE_KEY],
       gas: 2100000,
       gasPrice: 1000000000
@@ -29,10 +29,10 @@ module.exports = {
     customChains: [
       {
         network: "conduit",
-        chainId: 17071,
+        chainId: 11167,
         urls: {
-          apiURL: `https://explorer.onchainpoints.xyz/api`,
-          browserURL: "https://explorer.onchainpoints.xyz/",
+          apiURL: `https://explorer-devnet.powerloom.dev/api`,
+          browserURL: "https://explorer-devnet.powerloom.dev/",
         }
       }
     ]

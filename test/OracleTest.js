@@ -251,11 +251,11 @@ describe("Prediction Oracle", function () {
         await token.approve(predictionsOracle.target, buyAmount);
 
         // buy position on behalf of user (owner provides tokens, buying for otherAccount)
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         )).to.emit(predictionsOracle, "BuyPosition");
 
@@ -363,20 +363,20 @@ describe("Prediction Oracle", function () {
         await token.approve(predictionsOracle.target, buyAmount * BigInt(2));
 
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         )).to.emit(predictionsOracle, "BuyPosition");
 
         // buy for second question
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId2,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         )).to.emit(predictionsOracle, "BuyPosition");
 
@@ -552,20 +552,20 @@ describe("Prediction Oracle", function () {
         await token.approve(predictionsOracle.target, buyAmount * BigInt(2));
 
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         )).to.emit(predictionsOracle, "BuyPosition");
 
         // buy for second question
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId2,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         )).to.emit(predictionsOracle, "BuyPosition");
 
@@ -648,11 +648,11 @@ describe("Prediction Oracle", function () {
         await token.approve(predictionsOracle.target, buyAmount);
 
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         )).to.be.revertedWith("market is not active");
 
@@ -668,28 +668,14 @@ describe("Prediction Oracle", function () {
 
         const [owner, otherAccount] = await ethers.getSigners();
 
-        // set min buy amount
-        const newMinBuyAmount = BigInt("1000000000000000");
-        await predictionsOracle.updateMinBuyAmount(newMinBuyAmount);
-
-        const minBuyAmount = await predictionsOracle.minBuyAmount();
-        const invalidMinBuyAmount = minBuyAmount - BigInt(1)
-
-        // regular buy
-        await expect(predictionsOracle.buyPositionOnBehalf(
-            questionId,
-            1,
-            0,
-            invalidMinBuyAmount,
-            owner.address
-        )).to.be.revertedWith("Amount is less than minimum buy amount");
+        const minBuyAmount = BigInt("1000000000000000");
 
         // test with insufficient allowance
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             1,
-            0,
             minBuyAmount,
+            0,
             owner.address
         )).to.be.revertedWith("Insufficient allowance");
 
@@ -698,11 +684,11 @@ describe("Prediction Oracle", function () {
 
         // proposers can buy positions
         await predictionsOracle.updateProposers([owner.address], [1]);
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             1,
-            0,
             minBuyAmount,
+            0,
             owner.address
         )).to.emit(predictionsOracle, "BuyPosition");
 
@@ -714,11 +700,11 @@ describe("Prediction Oracle", function () {
 
         await token.approve(predictionsOracle.target, invalidMaxBuyAmount);
 
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             1,
-            0,
             invalidMaxBuyAmount,
+            0,
             owner.address
         )).to.be.revertedWith('Amount exceeds maximum buy amount per question');   
 
@@ -753,11 +739,11 @@ describe("Prediction Oracle", function () {
 
         await token.approve(predictionsOracle.target, buyAmount);
 
-        await predictionsOracle.buyPositionOnBehalf(
+        await predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         );
 
@@ -792,11 +778,11 @@ describe("Prediction Oracle", function () {
         const outcomeIndex = 1;
 
         for (const account of accounts) {
-            await predictionsOracle.buyPositionOnBehalf(
+            await predictionsOracle.buyPosition(
                 questionId,
                 outcomeIndex,
-                0,
                 buyAmount,
+                0,
                 account.address
             );
         }
@@ -807,11 +793,11 @@ describe("Prediction Oracle", function () {
         )).to.be.equal(accounts.length);
 
         // buy again with another account, shouldn't increment unique buys
-        await predictionsOracle.buyPositionOnBehalf(
+        await predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount3.address
         );
 
@@ -897,11 +883,11 @@ describe("Prediction Oracle", function () {
         await token.approve(predictionsOracle.target, buyAmount);
 
         // buy position on behalf of user
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        await expect(predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         )).to.emit(predictionsOracle, "BuyPosition");
 
@@ -987,11 +973,11 @@ describe("Prediction Oracle", function () {
 
         await token.approve(predictionsOracle.target, buyAmount);
 
-        await predictionsOracle.buyPositionOnBehalf(
+        await predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            0,
             buyAmount,
+            0,
             otherAccount.address
         );
 
@@ -1457,11 +1443,11 @@ describe("Prediction Oracle", function () {
     
             await token.approve(predictionsOracle.target, buyAmount);
 
-            await predictionsOracle.buyPositionOnBehalf(
+            await predictionsOracle.buyPosition(
                 questionId,
                 outcomeIndex,
-                0,
                 buyAmount,
+                0,
                 otherAccount.address
             );
     
@@ -1568,12 +1554,12 @@ describe("Prediction Oracle", function () {
 
         await token.approve(predictionsOracle.target, buyAmount * BigInt(2));
 
-        // Test with buyPositionOnBehalf
-        await expect(predictionsOracle.buyPositionOnBehalf(
+        // Test with buyPosition
+        await expect(predictionsOracle.buyPosition(
             questionId,
             outcomeIndex,
-            minTokensTooHigh,
             buyAmount,
+            minTokensTooHigh,
             otherAccount.address
         )).to.be.revertedWith("minimum buy amount not reached");
 
@@ -1597,7 +1583,7 @@ describe("Prediction Oracle", function () {
         const buyAmount = ethers.parseEther("1");
         const outcomeIndex = 1;
         await token.approve(predictionsOracle.target, buyAmount);
-        await predictionsOracle.buyPositionOnBehalf(questionId, outcomeIndex, 0, buyAmount, otherAccount.address);
+        await predictionsOracle.buyPosition(questionId, outcomeIndex, buyAmount, 0, otherAccount.address);
 
         // Fast forward time
         await time.increaseTo(endTime + 1);

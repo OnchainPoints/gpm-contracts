@@ -294,47 +294,6 @@ contract PredictionsOracle is Initializable, OwnableUpgradeable, ERC1155HolderUp
     }
 
     /**
-     * @dev Buys a position using locked tokens and optionally unlocked tokens (ETH)
-     * @param questionId The ID of the question
-     * @param outcomeIndex The index of the outcome to buy
-     * @param minOutcomeTokensToBuy The minimum number of outcome tokens to buy
-     * @param amount The total amount to spend (locked + unlocked tokens)
-     * @notice This function allows users to buy a position using their locked tokens and, if enabled, additional unlocked tokens (ETH)
-     * @notice If buyWithUnlockedEnabled is false, the function will not accept any ETH (msg.value must be 0)
-     */
-    function buyPositionOnBehalf(bytes32 questionId, uint256 outcomeIndex, uint256 minOutcomeTokensToBuy, uint256 amount, address spender) external nonReentrant {
-        require(amount >= minBuyAmount, "Amount is less than minimum buy amount");
-
-        require(collateralToken.allowance(msg.sender, address(this)) >= amount, "Insufficient allowance");
-        require(collateralToken.balanceOf(msg.sender) >= amount, "Insufficient balance");
-        collateralToken.transferFrom(msg.sender, address(this), amount);
-
-        uint256 userBuyAmount = userBuyAmounts[questionId][spender];
-        require(userBuyAmount + amount <= maxBuyAmountPerQuestion, "Amount exceeds maximum buy amount per question");
-
-        address fpmmAddress = questions[questionId].fpmm;
-        collateralToken.approve(fpmmAddress, amount);
-
-        userBuyAmounts[questionId][spender] = userBuyAmount + amount;
-
-        FixedProductMarketMaker fpmm = FixedProductMarketMaker(fpmmAddress);
-        uint256 outcomeTokensBought = fpmm.buyOnBehalf(amount, outcomeIndex, minOutcomeTokensToBuy, spender);
-        
-        userSpendings[spender] += amount;
-        userOpenPositions[spender].add(questionId);
-
-        emit BuyPosition(
-            spender,
-            fpmmAddress,
-            questionId,
-            amount,
-            fpmm.fee(),
-            outcomeIndex,
-            outcomeTokensBought
-        );
-    }
-
-    /**
      * @dev Buys a position using unlocked tokens
      * @param questionId The ID of the question
      * @param outcomeIndex The index of the outcome to buy
