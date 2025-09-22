@@ -21,7 +21,7 @@ async function main() {
     if (deployNewPop.toLowerCase() === 'y') {
         console.log("Deploying a new POP token...");
         const tokenContract = await hre.ethers.getContractFactory("POP");
-        const token = await tokenContract.deploy("Prediction Oracle Points", "POP");
+        const token = await tokenContract.deploy("Prediction Oracle Points", "POP", { gasLimit: 25000000 });
         await token.waitForDeployment();
         popAddress = token.target;
         console.log("POP token deployed to:", popAddress);
@@ -40,13 +40,13 @@ async function main() {
 
     // Deploy ConditionalTokens
     const conditionalTokenContract = await hre.ethers.getContractFactory("ConditionalTokens");
-    const conditionalToken = await conditionalTokenContract.deploy("TEST URI"); // The URI can be changed
+    const conditionalToken = await conditionalTokenContract.deploy("TEST URI", { gasLimit: 25000000 }); // The URI can be changed
     await conditionalToken.waitForDeployment();
     console.log("ConditionalTokens deployed to:", conditionalToken.target);
 
     // Deploy Factory
     const fpmmFactoryContract = await hre.ethers.getContractFactory("Factory");
-    const fpmmFactory = await fpmmFactoryContract.deploy();
+    const fpmmFactory = await fpmmFactoryContract.deploy({ gasLimit: 25000000 });
     await fpmmFactory.waitForDeployment();
     console.log("Factory deployed to:", fpmmFactory.target);
 
@@ -54,7 +54,8 @@ async function main() {
     const predictionOracleContract = await hre.ethers.getContractFactory("PredictionsOracle");
     const predictionsOracle = await upgrades.deployProxy(predictionOracleContract, [owner.address], {
         initializer: "initialize",
-        kind: "uups"
+        kind: "uups",
+        txOverrides: { gasLimit: 25000000 }
     });
     await predictionsOracle.waitForDeployment();
     console.log("PredictionsOracle proxy deployed to:", predictionsOracle.target);

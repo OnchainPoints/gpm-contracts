@@ -16,10 +16,8 @@ module.exports = {
   networks: {
     conduit: {
       url: process.env.RPC_URL_CONDUIT,
-      chainId: 11167,
-      accounts: [process.env.PRIVATE_KEY],
-      gas: 2100000,
-      gasPrice: 1000000000
+      chainId: 8453,
+      accounts: [process.env.PRIVATE_KEY]
     }
   },
   etherscan: {
@@ -29,10 +27,10 @@ module.exports = {
     customChains: [
       {
         network: "conduit",
-        chainId: 11167,
+        chainId: 8453,
         urls: {
-          apiURL: `https://explorer-devnet.powerloom.dev/api`,
-          browserURL: "https://explorer-devnet.powerloom.dev/",
+          apiURL: `https://api.basescan.org/v2/api`,
+          browserURL: "https://basescan.org/",
         }
       }
     ]
